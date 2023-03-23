@@ -26,22 +26,14 @@ import pascal.taie.analysis.dataflow.analysis.AbstractDataflowAnalysis;
 import pascal.taie.analysis.graph.cfg.CFG;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
-import pascal.taie.ir.exp.ArithmeticExp;
-import pascal.taie.ir.exp.BinaryExp;
-import pascal.taie.ir.exp.BitwiseExp;
-import pascal.taie.ir.exp.ConditionExp;
-import pascal.taie.ir.exp.Exp;
-import pascal.taie.ir.exp.IntLiteral;
-import pascal.taie.ir.exp.ShiftExp;
-import pascal.taie.ir.exp.Var;
+import pascal.taie.ir.exp.*;
 import pascal.taie.ir.stmt.DefinitionStmt;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.type.PrimitiveType;
 import pascal.taie.language.type.Type;
 import pascal.taie.util.AnalysisException;
 
-public class ConstantPropagation extends
-        AbstractDataflowAnalysis<Stmt, CPFact> {
+public class ConstantPropagation extends AbstractDataflowAnalysis<Stmt, CPFact> {
 
     public static final String ID = "constprop";
 
@@ -57,18 +49,27 @@ public class ConstantPropagation extends
     @Override
     public CPFact newBoundaryFact(CFG<Stmt> cfg) {
         // TODO - finish me
-        return null;
+        CPFact fact = new CPFact();
+        for (Var var : cfg.getIR().getParams()) {
+            if (canHoldInt(var)) {
+                fact.update(var, Value.getNAC());
+            }
+        }
+        return fact;
     }
 
     @Override
     public CPFact newInitialFact() {
         // TODO - finish me
-        return null;
+        return new CPFact();
     }
 
     @Override
     public void meetInto(CPFact fact, CPFact target) {
         // TODO - finish me
+        for (Var var : fact.keySet()) {
+            target.update(var, meetValue(fact.get(var), target.get(var)));
+        }
     }
 
     /**
@@ -76,13 +77,38 @@ public class ConstantPropagation extends
      */
     public Value meetValue(Value v1, Value v2) {
         // TODO - finish me
-        return null;
+        if (v1.isNAC() || v2.isNAC()) {
+            return Value.getNAC();
+        }
+        if (v1.isConstant() && v2.isUndef()) {
+            return Value.makeConstant(v1.getConstant());
+        }
+        if (v1.isUndef() && v2.isConstant()) {
+            return Value.makeConstant(v2.getConstant());
+        }
+        if (v1.isConstant() && v2.isConstant()) {
+            if (v1.equals(v2)) {
+                return Value.makeConstant(v1.getConstant());
+            } else {
+                return Value.getNAC();
+            }
+        }
+        return Value.getUndef();
     }
 
     @Override
     public boolean transferNode(Stmt stmt, CPFact in, CPFact out) {
         // TODO - finish me
-        return false;
+        if (stmt instanceof DefinitionStmt<?, ?> definitionStmt) {
+            LValue lvalue = definitionStmt.getLValue();
+            RValue rvalue = definitionStmt.getRValue();
+            if (lvalue instanceof Var var && canHoldInt(var)) {
+                CPFact inCopy = in.copy();
+                inCopy.update(var, evaluate(rvalue, in));
+                return out.copyFrom(inCopy);
+            }
+        }
+        return out.copyFrom(in);
     }
 
     /**
@@ -112,6 +138,97 @@ public class ConstantPropagation extends
      */
     public static Value evaluate(Exp exp, CPFact in) {
         // TODO - finish me
-        return null;
+        if (exp instanceof IntLiteral intLiteral) {
+            return Value.makeConstant(intLiteral.getValue());
+        }
+        if (exp instanceof Var var) {
+            if (in.get(var).isConstant()) {
+                return Value.makeConstant(in.get(var).getConstant());
+            } else {
+                return in.get(var);
+            }
+        }
+        if (exp instanceof BinaryExp binaryExp) {
+            Value v1 = evaluate(binaryExp.getOperand1(), in);
+            Value v2 = evaluate(binaryExp.getOperand2(), in);
+            if (v2.isConstant() && v2.getConstant() == 0) {
+                if (binaryExp.getOperator() instanceof ArithmeticExp.Op op) {
+                    if (op == ArithmeticExp.Op.DIV || op == ArithmeticExp.Op.REM) {
+                        return Value.getUndef();
+                    }
+                }
+            }
+            if (v1.isConstant() && v2.isConstant()) {
+                int num1 = v1.getConstant(), num2 = v2.getConstant();
+                if (binaryExp.getOperator() instanceof ArithmeticExp.Op op) {
+                    switch (op) {
+                        case ADD -> {
+                            return Value.makeConstant(num1 + num2);
+                        }
+                        case DIV -> {
+                            return Value.makeConstant(num1 / num2);
+                        }
+                        case MUL -> {
+                            return Value.makeConstant(num1 * num2);
+                        }
+                        case REM -> {
+                            return Value.makeConstant(num1 % num2);
+                        }
+                        case SUB -> {
+                            return Value.makeConstant(num1 - num2);
+                        }
+                    }
+                } else if (binaryExp.getOperator() instanceof ConditionExp.Op op) {
+                    switch (op) {
+                        case EQ -> {
+                            return Value.makeConstant(num1 == num2 ? 1 : 0);
+                        }
+                        case GE -> {
+                            return Value.makeConstant(num1 >= num2 ? 1 : 0);
+                        }
+                        case GT -> {
+                            return Value.makeConstant(num1 > num2 ? 1 : 0);
+                        }
+                        case LE -> {
+                            return Value.makeConstant(num1 <= num2 ? 1 : 0);
+                        }
+                        case LT -> {
+                            return Value.makeConstant(num1 < num2 ? 1 : 0);
+                        }
+                        case NE -> {
+                            return Value.makeConstant(num1 != num2 ? 1 : 0);
+                        }
+                    }
+                } else if (binaryExp.getOperator() instanceof ShiftExp.Op op) {
+                    switch (op) {
+                        case SHL -> {
+                            return Value.makeConstant(num1 << num2);
+                        }
+                        case SHR -> {
+                            return Value.makeConstant(num1 >> num2);
+                        }
+                        case USHR -> {
+                            return Value.makeConstant(num1 >>> num2);
+                        }
+                    }
+                } else if (binaryExp.getOperator() instanceof BitwiseExp.Op op) {
+                    switch (op) {
+                        case OR -> {
+                            return Value.makeConstant(num1 | num2);
+                        }
+                        case AND -> {
+                            return Value.makeConstant(num1 & num2);
+                        }
+                        case XOR -> {
+                            return Value.makeConstant(num1 ^ num2);
+                        }
+                    }
+                }
+            } else if (v1.isNAC() || v2.isNAC()) {
+                return Value.getNAC();
+            }
+            return Value.getUndef();
+        }
+        return Value.getNAC();
     }
 }

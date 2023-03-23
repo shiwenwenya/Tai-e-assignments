@@ -25,10 +25,10 @@ package pascal.taie;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
 /**
  * Main class for assignments.
  */
+
 public class Assignment {
 
     public static void main(String[] args) {

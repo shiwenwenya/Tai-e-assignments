@@ -1,5 +1,3 @@
-- id: class-dumper
-  options: {}
 - id: cipta
   options:
     merge-string-constants: false
@@ -14,3 +12,5 @@
     algorithm: cipta
     action: dump
     file: null
+- id: class-dumper
+  options: {}

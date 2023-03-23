@@ -44,10 +44,9 @@ import pascal.taie.ir.stmt.AssignStmt;
 import pascal.taie.ir.stmt.If;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.ir.stmt.SwitchStmt;
+import soot.jimple.IfStmt;
 
-import java.util.Comparator;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 public class DeadCodeDetection extends MethodAnalysis {
 
@@ -71,8 +70,58 @@ public class DeadCodeDetection extends MethodAnalysis {
         Set<Stmt> deadCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
         // TODO - finish me
         // Your task is to recognize dead code in ir and add it to deadCode
+        Set<Stmt> liveCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
+        Queue<Stmt> stmtQueue = new LinkedList<>();
+        stmtQueue.add(cfg.getEntry());
+        while (!stmtQueue.isEmpty()) {
+            Stmt stmt = stmtQueue.poll();
+            if (liveCode.contains(stmt)) {
+                continue;
+            }
+            if (stmt instanceof AssignStmt<?, ?> assignStmt) {
+                if (!(assignStmt.getLValue() instanceof Var var && hasNoSideEffect(assignStmt.getRValue()) && !liveVars.getResult(stmt).contains(var))) {
+                    liveCode.add(stmt);
+                }
+                stmtQueue.addAll(cfg.getSuccsOf(stmt));
+            } else if (stmt instanceof If ifStmt) {
+                liveCode.add(stmt);
+                Value conditionValue = ConstantPropagation.evaluate(ifStmt.getCondition(), constants.getInFact(stmt));
+                if (conditionValue.isConstant()) {
+                    for (Edge<Stmt> edge : cfg.getOutEdgesOf(stmt)) {
+                        if ((conditionValue.getConstant() == 1 && edge.getKind() == Edge.Kind.IF_TRUE) || (conditionValue.getConstant() == 0 && edge.getKind() == Edge.Kind.IF_FALSE)) {
+                            stmtQueue.add(edge.getTarget());
+                        }
+                    }
+                } else {
+                    stmtQueue.addAll(cfg.getSuccsOf(stmt));
+                }
+            } else if (stmt instanceof SwitchStmt switchStmt) {
+                liveCode.add(stmt);
+                Value varValue = ConstantPropagation.evaluate(switchStmt.getVar(), constants.getInFact(stmt));
+                if (varValue.isConstant()) {
+                    if (switchStmt.getCaseValues().contains(varValue.getConstant())) {
+                        for (Edge<Stmt> edge : cfg.getOutEdgesOf(stmt)) {
+                            if (edge.isSwitchCase() && edge.getCaseValue() == varValue.getConstant()) {
+                                stmtQueue.add(edge.getTarget());
+                            }
+                        }
+                    } else {
+                        stmtQueue.add(switchStmt.getDefaultTarget());
+                    }
+                } else {
+                    stmtQueue.addAll(cfg.getSuccsOf(stmt));
+                }
+            } else {
+                liveCode.add(stmt);
+                stmtQueue.addAll(cfg.getSuccsOf(stmt));
+            }
+        }
+        deadCode.addAll(cfg.getNodes());
+        deadCode.removeAll(liveCode);
+        deadCode.remove(cfg.getExit());
         return deadCode;
     }
+
 
     /**
      * @return true if given RValue has no side effect, otherwise false.
